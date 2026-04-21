@@ -1,0 +1,28 @@
+{
+  "chunk_seconds": 60,
+  "roi": {
+    "x": 6,
+    "y": 811,
+    "w": 259,
+    "h": 268
+  },
+  "source_master": "john/john_video_45deg_ver4.mp4",
+  "source_fps": 12,
+  "liveportrait": {
+    "flag_eye_retargeting": true,
+    "flag_force_cpu": true,
+    "flag_pasteback": false,
+    "flag_use_half_precision": false
+  },
+  "compositor": {
+    "alpha_cutoff": 0.48,
+    "alpha_erode": 5,
+    "alpha_post_blur": 0.45,
+    "handoff_start": 0.72,
+    "handoff_end": 0.94,
+    "suppress_strength": 0.60,
+    "suppress_dilate": 13,
+    "suppress_blur": 3.0,
+    "suppress_roi_blur_ksize": 19
+  }
+}

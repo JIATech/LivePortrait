@@ -32,3 +32,10 @@ LivePortrait_env/
 src/utils/dependencies/XPose/models/UniPose/ops/build
 src/utils/dependencies/XPose/models/UniPose/ops/dist
 src/utils/dependencies/XPose/models/UniPose/ops/MultiScaleDeformableAttention.egg-info
+
+.venv*
+
+# Local pipeline work and user media
+/.pipeline_work*/
+/output*/
+/john/
