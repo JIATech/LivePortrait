@@ -38,4 +38,6 @@ src/utils/dependencies/XPose/models/UniPose/ops/MultiScaleDeformableAttention.eg
 # Local pipeline work and user media
 /.pipeline_work*/
 /output*/
-/john/
+
+*.log
+gameplays_crudos/*
