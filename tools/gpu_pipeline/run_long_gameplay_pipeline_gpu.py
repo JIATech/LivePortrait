@@ -48,6 +48,8 @@ from tools.gpu_pipeline.gpu_pipeline_commands import (
     build_roi_chunk_cmd,
     q,
 )
+from tools.gpu_pipeline.popen_runner import make_popen_runner, run_command_plain
+from tools.gpu_pipeline.progress_tracker import ProgressTracker
 from tools.pipeline_runtime import (
     JobManifest,
     PipelineProfile,
@@ -190,14 +192,32 @@ def process_chunk(
     duration_seconds: float,
     paths: dict[str, Path],
     profile: PipelineProfile,
+    tracker: ProgressTracker | None = None,
 ) -> None:
-    del chunk_index
-    runner(build_full_chunk_cmd(input_video, start_seconds, duration_seconds, paths["full_chunk"]))
-    runner(build_roi_chunk_cmd(paths["full_chunk"], profile.roi, profile.source_fps, paths["roi_chunk"]))
-    runner(build_loop_source_cmd(source_prepared, duration_seconds, paths["source_loop"]))
-    runner(build_liveportrait_cmd(paths["source_loop"], paths["roi_chunk"], paths["patch_dir"], profile.liveportrait))
-    patch_video = resolve_patch_video_path(paths["patch_dir"])
-    runner(build_composite_cmd(paths["full_chunk"], patch_video, paths["composited"], profile.roi, profile.compositor))
+    stages: list[tuple[str, Callable[[], str]]] = [
+        ("extract", lambda: build_full_chunk_cmd(input_video, start_seconds, duration_seconds, paths["full_chunk"])),
+        ("roi_crop", lambda: build_roi_chunk_cmd(paths["full_chunk"], profile.roi, profile.source_fps, paths["roi_chunk"])),
+        ("source_loop", lambda: build_loop_source_cmd(source_prepared, duration_seconds, paths["source_loop"])),
+        ("liveportrait", lambda: build_liveportrait_cmd(paths["source_loop"], paths["roi_chunk"], paths["patch_dir"], profile.liveportrait)),
+        ("composite", lambda: build_composite_cmd(paths["full_chunk"], resolve_patch_video_path(paths["patch_dir"]), paths["composited"], profile.roi, profile.compositor)),
+    ]
+
+    for stage_name, cmd_builder in stages:
+        cmd = cmd_builder()
+        if tracker:
+            tracker.begin_stage(chunk_index, stage_name)
+        try:
+            if stage_name in ("extract", "roi_crop", "source_loop") and tracker:
+                popen_runner = make_popen_runner(tracker, chunk_index, stage_name)
+                popen_runner(cmd)
+            else:
+                runner(cmd)
+            if tracker:
+                tracker.end_stage(chunk_index, stage_name)
+        except Exception as exc:
+            if tracker:
+                tracker.fail_stage(chunk_index, stage_name, str(exc))
+            raise
 
 
 def build_report_payload(
@@ -302,40 +322,47 @@ def run_job(
         profile=profile,
     )
     source_prepared = prepare_source_master(job_paths.job_dir, profile, runner)
+    tracker = ProgressTracker(job_paths.job_dir, manifest)
 
-    for chunk in manifest.chunks:
-        if chunk.status == "done":
-            continue
+    try:
+        for chunk in manifest.chunks:
+            if chunk.status == "done":
+                tracker.mark_chunk_done(chunk.index)
+                continue
 
-        try:
-            paths = build_chunk_paths(job_paths.job_dir, chunk.index)
-            process_chunk(
-                runner=runner,
-                input_video=input_video,
-                source_prepared=source_prepared,
-                chunk_index=chunk.index,
-                start_seconds=chunk.start_seconds,
-                duration_seconds=chunk.duration_seconds,
-                paths=paths,
-                profile=profile,
-            )
-            chunk.status = "done"
-            chunk.error = None
-        except Exception as exc:
-            chunk.status = "failed"
-            chunk.error = str(exc)
-            write_report(
-                output_dir=job_paths.output_dir,
-                input_video=input_video,
-                profile=profile,
-                manifest=manifest,
-                config_path=resolved_config_path,
-                total_processing_seconds=time.perf_counter() - started_timer,
-                execution_timestamp=started_at,
-            )
-            raise
-        finally:
-            save_manifest(job_paths.manifest_path, manifest)
+            try:
+                paths = build_chunk_paths(job_paths.job_dir, chunk.index)
+                process_chunk(
+                    runner=runner,
+                    input_video=input_video,
+                    source_prepared=source_prepared,
+                    chunk_index=chunk.index,
+                    start_seconds=chunk.start_seconds,
+                    duration_seconds=chunk.duration_seconds,
+                    paths=paths,
+                    profile=profile,
+                    tracker=tracker,
+                )
+                chunk.status = "done"
+                chunk.error = None
+            except Exception as exc:
+                chunk.status = "failed"
+                chunk.error = str(exc)
+                write_report(
+                    output_dir=job_paths.output_dir,
+                    input_video=input_video,
+                    profile=profile,
+                    manifest=manifest,
+                    config_path=resolved_config_path,
+                    total_processing_seconds=time.perf_counter() - started_timer,
+                    execution_timestamp=started_at,
+                )
+                raise
+            finally:
+                save_manifest(job_paths.manifest_path, manifest)
+                tracker._flush()
+    finally:
+        tracker.close()
 
     final_video = assemble_final_output(
         job_dir=job_paths.job_dir,

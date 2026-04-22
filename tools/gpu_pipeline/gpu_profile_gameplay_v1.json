@@ -1,5 +1,5 @@
 {
-  "chunk_seconds": 120,
+  "chunk_seconds": 60,
   "roi": {
     "x": 6,
     "y": 811,
@@ -12,7 +12,7 @@
     "flag_eye_retargeting": true,
     "flag_force_cpu": false,
     "flag_pasteback": false,
-    "flag_use_half_precision": true
+    "flag_use_half_precision": false
   },
   "compositor": {
     "alpha_cutoff": 0.48,
