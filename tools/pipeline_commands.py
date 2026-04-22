@@ -131,7 +131,7 @@ def build_liveportrait_cmd(
 ) -> str:
     flags = LivePortraitFlags.from_value(liveportrait_flags)
     parts = [
-        '& ".venv311\\Scripts\\python.exe" inference.py',
+        "$env:PYTHONIOENCODING='utf-8'; & \".venv311\\Scripts\\python.exe\" inference.py",
         f'-s {q(source_video)}',
         f'-d {q(driving_video)}',
         f'-o {q(output_dir)}',

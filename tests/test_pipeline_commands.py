@@ -84,7 +84,7 @@ class PipelineCommandTests(unittest.TestCase):
         )
         self.assertEqual(
             cmd,
-            "& \".venv311\\Scripts\\python.exe\" inference.py -s 'source_looped.mp4' -d 'chunk_roi.mp4' "
+            "$env:PYTHONIOENCODING='utf-8'; & \".venv311\\Scripts\\python.exe\" inference.py -s 'source_looped.mp4' -d 'chunk_roi.mp4' "
             "-o 'chunk_out' --flag-eye-retargeting --flag-force-cpu --no-flag-pasteback "
             "--no-flag-use-half-precision",
         )
@@ -103,7 +103,7 @@ class PipelineCommandTests(unittest.TestCase):
         )
         self.assertEqual(
             cmd,
-            "& \".venv311\\Scripts\\python.exe\" inference.py -s 'source\"looped.mp4' -d 'chunk_roi.mp4' "
+            "$env:PYTHONIOENCODING='utf-8'; & \".venv311\\Scripts\\python.exe\" inference.py -s 'source\"looped.mp4' -d 'chunk_roi.mp4' "
             "-o 'chunk_out' --flag-eye-retargeting --flag-force-cpu --no-flag-pasteback "
             "--no-flag-use-half-precision",
         )
