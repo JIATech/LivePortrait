@@ -166,12 +166,11 @@ class ProgressTracker:
     def _flush(self) -> None:
         self.state.last_updated = _iso_now()
         data = asdict(self.state)
-        # Atomic write (Windows-safe: remove target first)
+        # Atomic write (Windows-safe: os.replace can overwrite open files)
+        import os
         tmp = self.state_path.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        if self.state_path.exists():
-            self.state_path.unlink()
-        tmp.rename(self.state_path)
+        os.replace(str(tmp), str(self.state_path))
 
 
 def _iso_now() -> str:

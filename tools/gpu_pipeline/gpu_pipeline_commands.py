@@ -36,11 +36,14 @@ def _nvenc_opts() -> str:
 
 
 def _python_exe() -> str:
-    """Return the Python interpreter to use.
+    r"""Return the Python interpreter to use.
 
-    On Windows with a venv activated, 'python' resolves to the venv Python.
-    If no venv is active, it falls back to the system Python.
+    Prefers the venv Python at .venv\Scripts\python.exe if it exists,
+    otherwise falls back to the system 'python'.
     """
+    venv_python = Path(".venv") / "Scripts" / "python.exe"
+    if venv_python.exists():
+        return str(venv_python)
     return "python"
 
 
