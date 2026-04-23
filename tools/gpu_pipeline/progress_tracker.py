@@ -1,11 +1,10 @@
 """ProgressTracker writes live pipeline state to a JSON file for the monitor."""
 
 import json
-import tempfile
+import os
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
 
 from tools.pipeline_runtime import JobManifest
 
@@ -47,6 +46,8 @@ class ProgressTracker:
         self.job_dir = job_dir
         self.state_path = job_dir / "state.json"
         self.manifest = manifest
+        self._started_monotonic = time.perf_counter()
+        self._last_flush_monotonic = 0.0
         self._stage_start_time: float | None = None
         self._liveportrait_times: list[float] = []
         self._composite_times: list[float] = []
@@ -115,7 +116,7 @@ class ProgressTracker:
                 stage.progress = min(1.0, frames_done / stage.frames_total)
         if progress is not None:
             stage.progress = min(1.0, max(0.0, progress))
-        self._flush()
+        self._flush(force=False)
 
     def end_stage(self, chunk_index: int, stage_name: str) -> None:
         stage = self._find_stage(self.state.chunks[chunk_index], stage_name)
@@ -159,25 +160,42 @@ class ProgressTracker:
         if done == 0:
             self.state.global_eta_seconds = None
             return
-        elapsed_total = time.perf_counter() - _parse_iso(self.state.started_at)
+        elapsed_total = time.perf_counter() - self._started_monotonic
         avg_per_chunk = elapsed_total / done
         self.state.global_eta_seconds = avg_per_chunk * pending
 
-    def _flush(self) -> None:
+    def _flush(self, force: bool = True) -> None:
+        now = time.perf_counter()
+        if not force and now - self._last_flush_monotonic < 0.25:
+            return
+
         self.state.last_updated = _iso_now()
-        data = asdict(self.state)
-        # Atomic write (Windows-safe: os.replace can overwrite open files)
-        import os
-        tmp = self.state_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        os.replace(str(tmp), str(self.state_path))
+        payload = json.dumps(asdict(self.state), indent=2)
+        tmp = self.state_path.with_suffix(f".{os.getpid()}.tmp")
+
+        # State updates are best-effort. Monitoring must never abort the job.
+        for _ in range(5):
+            try:
+                tmp.write_text(payload, encoding="utf-8")
+                os.replace(str(tmp), str(self.state_path))
+                self._last_flush_monotonic = time.perf_counter()
+                return
+            except OSError:
+                time.sleep(0.05)
+
+        try:
+            self.state_path.write_text(payload, encoding="utf-8")
+            self._last_flush_monotonic = time.perf_counter()
+        except OSError:
+            pass
+        finally:
+            try:
+                if tmp.exists():
+                    tmp.unlink()
+            except OSError:
+                pass
 
 
 def _iso_now() -> str:
     from datetime import datetime, timezone
     return datetime.now(timezone.utc).isoformat()
-
-
-def _parse_iso(iso: str) -> float:
-    from datetime import datetime, timezone
-    return datetime.fromisoformat(iso).timestamp()

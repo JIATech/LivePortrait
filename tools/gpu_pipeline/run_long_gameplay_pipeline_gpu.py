@@ -27,6 +27,8 @@ Usage:
 import argparse
 import hashlib
 import json
+import os
+import shutil
 import subprocess
 import sys
 import time
@@ -69,6 +71,10 @@ class JobPaths:
     final_video: Path
 
 
+def build_final_video_name(input_video: Path) -> str:
+    return f"{input_video.stem}_final.mp4"
+
+
 def discover_input_videos(input_dir: Path) -> list[Path]:
     if not input_dir.is_dir():
         return []
@@ -100,8 +106,20 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def progress_tracking_enabled() -> bool:
+    return os.getenv("LIVEPORTRAIT_DISABLE_PROGRESS_TRACKER") != "1"
+
+
+def resolve_shell_exe() -> str:
+    if shutil.which("pwsh"):
+        return "pwsh"
+    if shutil.which("powershell"):
+        return "powershell"
+    return "pwsh"
+
+
 def run_command(command: str) -> None:
-    subprocess.run(["pwsh", "-NoProfile", "-Command", command], check=True)
+    subprocess.run([resolve_shell_exe(), "-NoProfile", "-Command", command], check=True)
 
 
 def probe_duration_seconds(input_video: Path, runner: Runner | None = None) -> float:
@@ -140,13 +158,13 @@ def prepare_source_master(job_dir: Path, profile: PipelineProfile, runner: Runne
     return prepared
 
 
-def build_job_paths(work_dir: Path, output_dir: Path, job_id: str) -> JobPaths:
+def build_job_paths(work_dir: Path, output_dir: Path, job_id: str, input_video: Path) -> JobPaths:
     job_dir = work_dir / job_id
     return JobPaths(
         job_dir=job_dir,
         manifest_path=job_dir / "manifests" / "manifest.json",
         output_dir=output_dir,
-        final_video=output_dir / "final.mp4",
+        final_video=output_dir / build_final_video_name(input_video),
     )
 
 
@@ -295,7 +313,7 @@ def assemble_final_output(
     )
 
     visual_full = output_dir / "visual_full.mp4"
-    final_video = output_dir / "final.mp4"
+    final_video = output_dir / build_final_video_name(input_video)
     runner(build_concat_visual_cmd(list_file, visual_full))
     runner(build_mux_audio_cmd(input_video, visual_full, final_video))
     return final_video
@@ -312,7 +330,12 @@ def run_job(
     started_at = datetime.now(timezone.utc).isoformat()
     started_timer = time.perf_counter()
     job_id = build_video_id(input_video)
-    job_paths = build_job_paths(work_dir=work_dir, output_dir=output_dir, job_id=job_id)
+    job_paths = build_job_paths(
+        work_dir=work_dir,
+        output_dir=output_dir,
+        job_id=job_id,
+        input_video=input_video,
+    )
     resolved_config_path = config_path or Path("tools/gpu_pipeline/gpu_profile_gameplay_v1.json")
     job_paths.output_dir.mkdir(parents=True, exist_ok=True)
     manifest = load_or_create_manifest(
@@ -322,12 +345,13 @@ def run_job(
         profile=profile,
     )
     source_prepared = prepare_source_master(job_paths.job_dir, profile, runner)
-    tracker = ProgressTracker(job_paths.job_dir, manifest)
+    tracker = ProgressTracker(job_paths.job_dir, manifest) if progress_tracking_enabled() else None
 
     try:
         for chunk in manifest.chunks:
             if chunk.status == "done":
-                tracker.mark_chunk_done(chunk.index)
+                if tracker:
+                    tracker.mark_chunk_done(chunk.index)
                 continue
 
             try:
@@ -360,9 +384,11 @@ def run_job(
                 raise
             finally:
                 save_manifest(job_paths.manifest_path, manifest)
-                tracker._flush()
+                if tracker:
+                    tracker._flush()
     finally:
-        tracker.close()
+        if tracker:
+            tracker.close()
 
     final_video = assemble_final_output(
         job_dir=job_paths.job_dir,
